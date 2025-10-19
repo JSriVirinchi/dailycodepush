@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ApiError, getRecentSubmissions, submitSolution } from '../lib/api';
+import {
+  ApiError,
+  getLeetCodeSessionStatus,
+  getRecentSubmissions,
+  storeLeetCodeSession,
+  submitSolution
+} from '../lib/api';
 import type { CommunitySolution, SubmissionResult, SubmissionStep, SubmissionSummary } from '../lib/types';
 
 type SolutionViewerProps = {
@@ -8,8 +14,76 @@ type SolutionViewerProps = {
   errorMessage: string | null;
   onRetry: () => void;
   selectedLanguage: string;
+  onLanguageChange: (language: string) => void;
   questionSlug: string | null;
 };
+
+type SessionFetchStatus = 'idle' | 'fetching' | 'success' | 'error';
+
+type SessionTokens = {
+  leetcodeSession: string | null;
+  csrfToken: string | null;
+};
+
+type ExtensionPayload =
+  | {
+      ok: true;
+      leetcodeSession: string | null;
+      csrfToken: string | null;
+    }
+  | {
+      ok: false;
+      error?: string;
+      leetcodeSession?: string | null;
+      csrfToken?: string | null;
+    };
+
+const REQUEST_TYPE = 'LEETCODE_FETCH_COOKIES_REQUEST';
+const RESPONSE_TYPE = 'LEETCODE_FETCH_COOKIES_RESPONSE';
+
+const LANGUAGES = [
+  'python',
+  'cpp',
+  'java',
+  'javascript',
+  'typescript',
+  'c',
+  'csharp',
+  'go',
+  'rust',
+  'kotlin',
+  'swift'
+] as const;
+
+const SESSION_STATUS_STYLES: Record<SessionFetchStatus, string> = {
+  idle: 'bg-slate-200 text-slate-600',
+  fetching: 'bg-amber-100 text-amber-700',
+  success: 'bg-emerald-100 text-emerald-700',
+  error: 'bg-rose-100 text-rose-700'
+};
+
+const SESSION_STATUS_LABELS: Record<SessionFetchStatus, string> = {
+  idle: 'Not fetched yet',
+  fetching: 'Fetching…',
+  success: 'Connected',
+  error: 'Error'
+};
+
+const STEP_BADGE_STYLES: Record<SubmissionStep['status'], string> = {
+  success: 'bg-emerald-100 text-emerald-700',
+  error: 'bg-rose-100 text-rose-700',
+  info: 'bg-slate-100 text-slate-600'
+};
+
+const STEP_INDICATOR_STYLES: Record<SubmissionStep['status'], string> = {
+  success: 'bg-emerald-500',
+  error: 'bg-rose-500',
+  info: 'bg-slate-400'
+};
+
+const STORAGE_KEY_PREFIX = 'leetcode-submission:';
+
+const getStorageKey = (slug: string) => `${STORAGE_KEY_PREFIX}${slug}`;
 
 const decodeHtml = (snippet: string) =>
   snippet
@@ -49,21 +123,25 @@ const extractCodeFromContent = (rawContent: string | null | undefined): string |
   return null;
 };
 
-const STEP_STYLE: Record<SubmissionStep['status'], string> = {
-  success: 'bg-emerald-100 text-emerald-700',
-  error: 'bg-rose-100 text-rose-700',
-  info: 'bg-slate-100 text-slate-600'
-};
+const SolutionViewer = ({
+  solution,
+  isLoading,
+  errorMessage,
+  onRetry,
+  selectedLanguage,
+  onLanguageChange,
+  questionSlug
+}: SolutionViewerProps) => {
+  const [sessionStatus, setSessionStatus] = useState<SessionFetchStatus>('idle');
+  const [sessionMessage, setSessionMessage] = useState<string | null>(null);
+  const [sessionTokens, setSessionTokens] = useState<SessionTokens>({ leetcodeSession: null, csrfToken: null });
+  const [isSessionLoading, setIsSessionLoading] = useState(false);
 
-const STORAGE_KEY_PREFIX = 'leetcode-submission:';
-
-const getStorageKey = (slug: string) => `${STORAGE_KEY_PREFIX}${slug}`;
-
-const SolutionViewer = ({ solution, isLoading, errorMessage, onRetry, selectedLanguage, questionSlug }: SolutionViewerProps) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submissionSteps, setSubmissionSteps] = useState<SubmissionStep[]>([]);
   const [submissionResult, setSubmissionResult] = useState<SubmissionResult | null>(null);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
+
   const [recentSubmissions, setRecentSubmissions] = useState<SubmissionSummary[]>([]);
   const [isLoadingSubmissions, setIsLoadingSubmissions] = useState(false);
   const [submissionsError, setSubmissionsError] = useState<string | null>(null);
@@ -76,6 +154,7 @@ const SolutionViewer = ({ solution, isLoading, errorMessage, onRetry, selectedLa
         .replace(/\b\w/g, (match) => match.toUpperCase()),
     []
   );
+
   const getStatusLabel = useCallback((status: SubmissionStep['status']) => {
     if (status === 'success') {
       return 'Success';
@@ -106,6 +185,23 @@ const SolutionViewer = ({ solution, isLoading, errorMessage, onRetry, selectedLa
     return 'bg-slate-100 text-slate-600';
   }, []);
 
+  const getSubmissionDotClass = useCallback((statusDisplay?: string | null, isPending?: boolean) => {
+    if (isPending) {
+      return 'bg-amber-500';
+    }
+    if (!statusDisplay) {
+      return 'bg-slate-400';
+    }
+    const normalized = statusDisplay.toLowerCase();
+    if (normalized.includes('accept')) {
+      return 'bg-emerald-500';
+    }
+    if (normalized.includes('wrong') || normalized.includes('error') || normalized.includes('time') || normalized.includes('fail')) {
+      return 'bg-rose-500';
+    }
+    return 'bg-slate-400';
+  }, []);
+
   const displayCode = useMemo(() => {
     if (!solution) {
       return null;
@@ -116,6 +212,34 @@ const SolutionViewer = ({ solution, isLoading, errorMessage, onRetry, selectedLa
     const fallback = extractCodeFromContent(solution.content);
     return fallback;
   }, [solution]);
+
+  const refreshSessionStatus = useCallback(async () => {
+    setIsSessionLoading(true);
+    try {
+      const data = await getLeetCodeSessionStatus();
+      setSessionTokens({
+        leetcodeSession: data.leetcode_session,
+        csrfToken: data.csrf_token
+      });
+      if (data.connected) {
+        setSessionStatus('success');
+        setSessionMessage('Using saved session tokens from the extension.');
+      } else {
+        setSessionStatus('idle');
+        setSessionMessage('Click the button to fetch fresh session tokens before submitting.');
+      }
+    } catch (error) {
+      setSessionStatus('error');
+      setSessionMessage(error instanceof Error ? error.message : 'Failed to load session status.');
+      setSessionTokens({ leetcodeSession: null, csrfToken: null });
+    } finally {
+      setIsSessionLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshSessionStatus();
+  }, [refreshSessionStatus]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -151,6 +275,62 @@ const SolutionViewer = ({ solution, isLoading, errorMessage, onRetry, selectedLa
       setSubmissionError(null);
     }
   }, [questionSlug]);
+
+  const requestTokensFromExtension = useCallback((): Promise<SessionTokens> => {
+    if (typeof window === 'undefined') {
+      return Promise.reject(new Error('Browser extension is only available inside the browser environment.'));
+    }
+
+    return new Promise<SessionTokens>((resolve, reject) => {
+      let timeoutId: number | undefined;
+
+      const cleanup = () => {
+        window.removeEventListener('message', handler);
+        if (timeoutId !== undefined) {
+          window.clearTimeout(timeoutId);
+        }
+      };
+
+      const handler = (event: MessageEvent) => {
+        if (event.source !== window || !event.data || event.data.type !== RESPONSE_TYPE) {
+          return;
+        }
+
+        cleanup();
+        const payload: ExtensionPayload = event.data.payload;
+
+        if (!payload.ok) {
+          reject(new Error(payload.error ?? 'Extension could not fetch cookies. Make sure you are logged in on leetcode.com.'));
+          return;
+        }
+
+        if (!payload.leetcodeSession || !payload.csrfToken) {
+          reject(new Error('Extension did not return both LEETCODE_SESSION and csrftoken cookies.'));
+          return;
+        }
+
+        resolve({
+          leetcodeSession: payload.leetcodeSession,
+          csrfToken: payload.csrfToken
+        });
+      };
+
+      window.addEventListener('message', handler);
+
+      try {
+        window.postMessage({ type: REQUEST_TYPE }, '*');
+      } catch (error) {
+        cleanup();
+        reject(error instanceof Error ? error : new Error('Unable to communicate with the extension.'));
+        return;
+      }
+
+      timeoutId = window.setTimeout(() => {
+        cleanup();
+        reject(new Error('Extension did not respond in time. Ensure it is installed and active.'));
+      }, 7000);
+    });
+  }, []);
 
   const loadRecentSubmissions = useCallback(async () => {
     if (!questionSlug) {
@@ -211,6 +391,26 @@ const SolutionViewer = ({ solution, isLoading, errorMessage, onRetry, selectedLa
     setSubmissionResult(null);
     setSubmissionSteps([{ step: 'start', status: 'info', detail: 'Starting submission workflow.' }]);
 
+    setSessionStatus('fetching');
+    setSessionMessage('Requesting session cookies from the extension…');
+
+    try {
+      const tokens = await requestTokensFromExtension();
+      await storeLeetCodeSession(tokens.leetcodeSession as string, tokens.csrfToken as string);
+      setSessionTokens(tokens);
+      setSessionStatus('success');
+      setSessionMessage('Extension fetch succeeded. Session ready for submission.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to fetch session tokens.';
+      setSessionStatus('error');
+      setSessionMessage(message);
+      setSubmissionSteps([]);
+      setSubmissionResult(null);
+      setSubmissionError(message);
+      setIsSubmitting(false);
+      return;
+    }
+
     try {
       const response = await submitSolution({
         slug: questionSlug,
@@ -220,8 +420,6 @@ const SolutionViewer = ({ solution, isLoading, errorMessage, onRetry, selectedLa
 
       if (response.steps && response.steps.length > 0) {
         setSubmissionSteps(response.steps);
-      } else {
-        setSubmissionSteps((previous) => (previous.length ? previous : []));
       }
       if (response.result) {
         setSubmissionResult(response.result);
@@ -238,10 +436,9 @@ const SolutionViewer = ({ solution, isLoading, errorMessage, onRetry, selectedLa
       setIsSubmitting(false);
       void loadRecentSubmissions();
     }
-  }, [questionSlug, displayCode, selectedLanguage, loadRecentSubmissions]);
+  }, [questionSlug, displayCode, selectedLanguage, requestTokensFromExtension, loadRecentSubmissions]);
 
   const isSubmitDisabled = !displayCode || !questionSlug || isSubmitting;
-
 
   useEffect(() => {
     if (typeof window === 'undefined' || !questionSlug) {
@@ -305,84 +502,168 @@ const SolutionViewer = ({ solution, isLoading, errorMessage, onRetry, selectedLa
     );
   }
 
+  const lastStep = submissionSteps.length ? submissionSteps[submissionSteps.length - 1] : null;
+  const finalStatus = submissionResult?.status_msg ?? lastStep?.detail ?? null;
+
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-      <div className="flex flex-col gap-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <p className="text-sm font-semibold text-emerald-700">Community Solution (Most Votes)</p>
-            <h3 className="text-lg font-semibold text-slate-900">{solution.title}</h3>
-            <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-slate-500">
-              {solution.language && <span className="rounded-full bg-slate-100 px-2 py-1 font-medium text-slate-600">{solution.language}</span>}
-              {typeof solution.votes === 'number' && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 font-medium text-slate-600">
-                  <span aria-hidden="true">▲</span>
-                  {solution.votes}
-                </span>
-              )}
-            </div>
+      <div className="flex flex-col gap-6">
+        <header className="flex flex-col gap-3">
+          <p className="text-sm font-semibold text-emerald-700">Community Solution (Most Votes)</p>
+          <h3 className="text-lg font-semibold text-slate-900">{solution.title}</h3>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+            {solution.language && <span className="rounded-full bg-slate-100 px-2 py-1 font-medium text-slate-600">{solution.language}</span>}
+            {typeof solution.votes === 'number' && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 font-medium text-slate-600">
+                <span aria-hidden="true">▲</span>
+                {solution.votes}
+              </span>
+            )}
           </div>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <button
-              type="button"
-              onClick={() => window.open(solution.url, '_blank', 'noreferrer')}
-              className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow transition hover:bg-emerald-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600"
+        </header>
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-4">
+          <div className="flex flex-col gap-2 sm:flex-1">
+            <label htmlFor="language-select" className="text-sm font-semibold text-slate-900">
+              Preferred language
+            </label>
+            <select
+              id="language-select"
+              value={selectedLanguage}
+              onChange={(event) => onLanguageChange(event.target.value)}
+              className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm text-slate-900 shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 sm:max-w-md"
             >
-              Open on LeetCode
-            </button>
-            <button
-              type="button"
-              onClick={handleSubmit}
-              disabled={isSubmitDisabled}
-              className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow transition hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:cursor-not-allowed disabled:bg-indigo-300"
-            >
-              {isSubmitting ? 'Submitting...' : 'Submit to LeetCode'}
-            </button>
+              {LANGUAGES.map((language) => (
+                <option key={language} value={language}>
+                  {language}
+                </option>
+              ))}
+            </select>
           </div>
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={isSubmitDisabled}
+            className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-6 py-2.5 text-sm font-semibold text-white shadow transition hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:cursor-not-allowed disabled:bg-indigo-300"
+          >
+            {isSubmitting ? 'Working…' : 'Submit the solution'}
+          </button>
         </div>
-        {displayCode ? (
-          <div className="max-h-96 overflow-auto rounded-2xl border border-slate-200 bg-slate-950/90 text-slate-50 shadow-inner">
-            <pre className="whitespace-pre-wrap p-4 text-sm leading-6">
-              <code>{displayCode}</code>
-            </pre>
+
+        <details
+          className="rounded-2xl border border-slate-200 bg-slate-100/70 p-4 text-sm text-slate-700"
+          open={sessionStatus !== 'idle' || isSubmitting}
+        >
+          <summary className="flex cursor-pointer items-center justify-between gap-3 text-sm font-semibold text-slate-900">
+            <span>Step 1 · Extension session fetch</span>
+            <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${SESSION_STATUS_STYLES[sessionStatus]}`}>
+              {SESSION_STATUS_LABELS[sessionStatus]}
+            </span>
+          </summary>
+          <div className="mt-3 space-y-3">
+            {isSessionLoading && sessionStatus === 'idle' ? (
+              <div className="flex animate-pulse flex-col gap-2">
+                <div className="h-3 rounded-full bg-slate-200" />
+                <div className="h-3 w-2/3 rounded-full bg-slate-200" />
+              </div>
+            ) : (
+              <>
+                <p className="text-xs text-slate-600">{sessionMessage ?? 'Ready to request session tokens.'}</p>
+                <dl className="space-y-3">
+                  <div>
+                    <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">LEETCODE_SESSION</dt>
+                    <dd className="mt-1 overflow-x-auto rounded-lg bg-white px-3 py-2 text-xs text-slate-800 shadow-inner">
+                      <code className="whitespace-nowrap font-mono">{sessionTokens.leetcodeSession || '—'}</code>
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs font-semibold uppercase tracking-wide text-slate-500">csrftoken</dt>
+                    <dd className="mt-1 overflow-x-auto rounded-lg bg-white px-3 py-2 text-xs text-slate-800 shadow-inner">
+                      <code className="whitespace-nowrap font-mono">{sessionTokens.csrfToken || '—'}</code>
+                    </dd>
+                  </div>
+                </dl>
+              </>
+            )}
           </div>
-        ) : (
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-            Could not extract a {selectedLanguage} code snippet from the most voted solution. View the full post on LeetCode for details.
-          </div>
-        )}
-        {(submissionSteps.length > 0 || submissionResult || submissionError || isSubmitting) && (
-          <div className="rounded-2xl border border-slate-200 bg-slate-100/70 p-4 text-sm text-slate-700">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm font-semibold text-slate-900">Submission status</p>
-              {isSubmitting && (
-                <span className="inline-flex items-center gap-2 rounded-full bg-indigo-100 px-3 py-1 text-xs font-semibold text-indigo-700">
-                  <span className="h-2 w-2 animate-pulse rounded-full bg-indigo-500" aria-hidden="true" />
-                  In progress…
-                </span>
+        </details>
+
+        <details className="rounded-2xl border border-slate-200 bg-slate-100/60 p-4 text-sm text-slate-700" open>
+          <summary className="flex cursor-pointer items-center justify-between gap-3 text-sm font-semibold text-slate-900">
+            <span>Step 2 · What code will be submitted?</span>
+            <span className="text-xs text-slate-500">
+              {solution.language ? `Language: ${solution.language}` : selectedLanguage}
+              {typeof solution.votes === 'number' ? ` · Votes: ${solution.votes}` : ''}
+            </span>
+          </summary>
+          <div className="mt-3 space-y-3">
+            <div className="text-xs text-slate-600">
+              <p>{solution.url ? 'Source: LeetCode discussion thread' : 'Community discussion snapshot'}</p>
+              {solution.url && (
+                <a
+                  href={solution.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-1 inline-block text-xs font-semibold text-emerald-700 underline decoration-emerald-400 decoration-2 underline-offset-4 hover:text-emerald-600"
+                >
+                  Open on LeetCode
+                </a>
               )}
             </div>
-            {submissionSteps.length > 0 ? (
-              <ul className="mt-3 space-y-2">
-                {submissionSteps.map((step, index) => (
-                  <li key={`${step.step}-${index}`} className="flex flex-col gap-2 rounded-xl bg-white p-3 shadow-sm sm:flex-row sm:items-start sm:gap-3">
-                    <span className={`inline-flex w-fit items-center rounded-full px-2.5 py-1 text-xs font-semibold ${STEP_STYLE[step.status]}`}>
-                      {getStatusLabel(step.status)}
-                    </span>
-                    <div className="text-xs text-slate-600 sm:text-sm">
-                      <p className="font-medium text-slate-800">{formatStepLabel(step.step)}</p>
-                      {step.detail && <p className="text-xs text-slate-500 sm:text-sm">{step.detail}</p>}
-                    </div>
-                  </li>
-                ))}
-              </ul>
+            {displayCode ? (
+              <div className="max-h-96 overflow-auto rounded-2xl border border-slate-200 bg-slate-950/90 text-slate-50 shadow-inner">
+                <pre className="whitespace-pre-wrap p-4 text-sm leading-6">
+                  <code>{displayCode}</code>
+                </pre>
+              </div>
             ) : (
-              <p className="mt-3 text-xs text-slate-600">
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                Could not extract a {selectedLanguage} code snippet from the most voted solution. View the full post on LeetCode for details.
+              </div>
+            )}
+          </div>
+        </details>
+
+        <details
+          className="rounded-2xl border border-slate-200 bg-slate-100/70 p-4 text-sm text-slate-700"
+          open={Boolean(submissionSteps.length || submissionResult || submissionError || isSubmitting)}
+        >
+          <summary className="flex cursor-pointer items-center justify-between gap-3 text-sm font-semibold text-slate-900">
+            <span>Step 3 · Submission status</span>
+            {finalStatus && <span className="text-xs text-slate-500">{finalStatus}</span>}
+          </summary>
+          <div className="mt-4 space-y-4">
+            {submissionSteps.length > 0 ? (
+              <div className="flex flex-col gap-4 border-l-2 border-slate-200 pl-6">
+                {submissionSteps.map((step, index) => (
+                  <div key={`${step.step}-${index}`} className="relative">
+                    <span
+                      className={`absolute left-0 top-3 flex h-6 w-6 -translate-x-1/2 items-center justify-center rounded-full text-xs font-semibold text-white shadow ${STEP_INDICATOR_STYLES[step.status]}`}
+                    >
+                      {index + 1}
+                    </span>
+                    <div className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">{formatStepLabel(step.step)}</p>
+                          {step.detail && <p className="text-xs text-slate-600">{step.detail}</p>}
+                        </div>
+                        <span className={`inline-flex items-center rounded-full px-2 py-1 text-[11px] font-medium ${STEP_BADGE_STYLES[step.status]}`}>
+                          {getStatusLabel(step.status)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-slate-600">
                 {isSubmitting ? 'Waiting for LeetCode to respond…' : 'No submission activity yet.'}
               </p>
             )}
+
             {submissionResult && (
-              <div className="mt-4 rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-600 shadow-inner">
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 text-xs text-slate-600 shadow-inner">
                 <p className="text-sm font-semibold text-slate-900">
                   Result: {submissionResult.status_msg ?? 'Unknown'}
                   {submissionResult.state ? ` (${submissionResult.state})` : ''}
@@ -452,76 +733,86 @@ const SolutionViewer = ({ solution, isLoading, errorMessage, onRetry, selectedLa
                 )}
               </div>
             )}
+
             {submissionError && (
-              <p className="mt-3 rounded-xl bg-rose-100 px-3 py-2 text-xs font-semibold text-rose-700">
+              <p className="rounded-xl bg-rose-100 px-3 py-2 text-xs font-semibold text-rose-700">
                 {submissionError}
               </p>
             )}
           </div>
-        )}
+        </details>
+
         {questionSlug && (
-          <div className="rounded-2xl border border-slate-200 bg-slate-100/70 p-4 text-sm text-slate-700">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-sm font-semibold text-slate-900">Recent LeetCode submissions</p>
-              <button
-                type="button"
-                onClick={() => void loadRecentSubmissions()}
-                disabled={isLoadingSubmissions || !questionSlug}
-                className="inline-flex items-center justify-center rounded-xl border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-400 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isLoadingSubmissions ? 'Refreshing...' : 'Refresh'}
-              </button>
-            </div>
-            {submissionsError ? (
-              <p className="mt-3 rounded-xl bg-rose-100 px-3 py-2 text-xs font-semibold text-rose-700">{submissionsError}</p>
-            ) : isLoadingSubmissions ? (
-              <div className="mt-3 space-y-2">
-                <div className="h-16 animate-pulse rounded-xl bg-slate-200" />
-                <div className="h-16 animate-pulse rounded-xl bg-slate-200" />
+          <details className="rounded-2xl border border-slate-200 bg-slate-100/60 p-4 text-sm text-slate-700" open>
+            <summary className="flex cursor-pointer items-center justify-between gap-3 text-sm font-semibold text-slate-900">
+              <span>Step 4 · Recent LeetCode submissions</span>
+              {recentSubmissions.length > 0 && <span className="text-xs text-slate-500">{recentSubmissions.length} shown</span>}
+            </summary>
+            <div className="mt-3 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs text-slate-500">Track how the latest runs are doing.</p>
+                <button
+                  type="button"
+                  onClick={() => void loadRecentSubmissions()}
+                  disabled={isLoadingSubmissions || !questionSlug}
+                  className="inline-flex items-center justify-center rounded-xl border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-400 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isLoadingSubmissions ? 'Refreshing…' : 'Refresh'}
+                </button>
               </div>
-            ) : recentSubmissions.length > 0 ? (
-              <ul className="mt-3 space-y-3">
-                {recentSubmissions.map((submission) => (
-                  <li key={submission.submission_id} className="rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-600 shadow-sm">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${getSubmissionStatusClass(submission.status_display, submission.is_pending)}`}>
-                        {submission.status_display ?? 'Pending'}
-                      </span>
-                      {submission.relative_time && <span className="text-[11px] text-slate-500">{submission.relative_time}</span>}
-                    </div>
-                    <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-                      {submission.lang_name && <span className="rounded-full bg-slate-100 px-2 py-1 font-medium text-slate-600">{submission.lang_name}</span>}
-                      {submission.runtime_display && <span className="rounded-full bg-slate-100 px-2 py-1">{submission.runtime_display}</span>}
-                      {submission.memory_display && <span className="rounded-full bg-slate-100 px-2 py-1">{submission.memory_display}</span>}
-                    </div>
-                    {submission.url && (
-                      <button
-                        type="button"
-                        onClick={() => submission.url && window.open(submission.url, '_blank', 'noreferrer')}
-                        className="mt-3 inline-flex items-center justify-center rounded-lg border border-slate-300 px-3 py-1 text-[11px] font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
-                      >
-                        View on LeetCode
-                      </button>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="mt-3 text-xs text-slate-600">No submissions found for this question.</p>
-            )}
-            {hasMoreSubmissions && !isLoadingSubmissions && !submissionsError && recentSubmissions.length > 0 && (
-              <p className="mt-3 text-[11px] text-slate-500">Showing the 10 most recent submissions.</p>
-            )}
-          </div>
-        )}
-        {solution.content && (
-          <details className="rounded-2xl border border-slate-200 bg-slate-100/60 p-4 text-sm text-slate-700">
-            <summary className="cursor-pointer font-medium text-slate-800">View raw community content (debug)</summary>
-            <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap rounded-xl bg-white p-3 font-mono text-xs text-slate-800 shadow-inner">
-              {solution.content}
-            </pre>
+              {submissionsError ? (
+                <p className="rounded-xl bg-rose-100 px-3 py-2 text-xs font-semibold text-rose-700">{submissionsError}</p>
+              ) : isLoadingSubmissions ? (
+                <div className="space-y-2">
+                  <div className="h-16 animate-pulse rounded-xl bg-slate-200" />
+                  <div className="h-16 animate-pulse rounded-xl bg-slate-200" />
+                </div>
+              ) : recentSubmissions.length > 0 ? (
+                <div className="flex flex-col gap-4 border-l-2 border-slate-200 pl-6">
+                  {recentSubmissions.map((submission) => {
+                    const statusClass = getSubmissionStatusClass(submission.status_display, submission.is_pending);
+                    const dotClass = getSubmissionDotClass(submission.status_display, submission.is_pending);
+                    return (
+                      <div key={submission.submission_id} className="relative text-xs text-slate-600">
+                        <span className={`absolute left-0 top-4 h-3 w-3 -translate-x-1/2 rounded-full ${dotClass} ring-4 ring-slate-100`} aria-hidden="true" />
+                        <div className="space-y-2 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${statusClass}`}>
+                              {submission.status_display ?? 'Pending'}
+                            </span>
+                            {submission.relative_time && <span className="text-[11px] text-slate-500">{submission.relative_time}</span>}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
+                            {submission.lang_name && (
+                              <span className="rounded-full bg-slate-100 px-2 py-1 font-medium text-slate-600">{submission.lang_name}</span>
+                            )}
+                            {submission.runtime_display && <span className="rounded-full bg-slate-100 px-2 py-1">{submission.runtime_display}</span>}
+                            {submission.memory_display && <span className="rounded-full bg-slate-100 px-2 py-1">{submission.memory_display}</span>}
+                          </div>
+                          {submission.url && (
+                            <button
+                              type="button"
+                              onClick={() => submission.url && window.open(submission.url, '_blank', 'noreferrer')}
+                              className="inline-flex items-center justify-center rounded-lg border border-slate-300 px-3 py-1 text-[11px] font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-400"
+                            >
+                              View on LeetCode
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-xs text-slate-600">No submissions found for this question.</p>
+              )}
+              {hasMoreSubmissions && !isLoadingSubmissions && !submissionsError && recentSubmissions.length > 0 && (
+                <p className="text-[11px] text-slate-500">Showing the 10 most recent submissions.</p>
+              )}
+            </div>
           </details>
         )}
+
       </div>
     </section>
   );

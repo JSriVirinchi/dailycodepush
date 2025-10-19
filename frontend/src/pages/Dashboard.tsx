@@ -4,10 +4,8 @@ import Header from '../components/Header';
 import Footer from '../components/Footer';
 import StatusBar from '../components/StatusBar';
 import PotdCard from '../components/PotdCard';
-import LanguagePicker from '../components/LanguagePicker';
 import ReferencesList from '../components/ReferencesList';
 import SolutionViewer from '../components/SolutionViewer';
-import LeetCodeSessionConnector from '../components/LeetCodeSessionConnector';
 import { getPOTD, getReferences, API_BASE_URL, ApiError } from '../lib/api';
 import type { POTD, ReferencesResponse } from '../lib/types';
 
@@ -77,8 +75,6 @@ const Dashboard = () => {
               }
             }}
           />
-          <LanguagePicker value={language} onChange={setLanguage} />
-          <LeetCodeSessionConnector />
           <SolutionViewer
             solution={communitySolution}
             isLoading={isReferencesLoading}
@@ -86,6 +82,7 @@ const Dashboard = () => {
             onRetry={() => referencesQuery.refetch()}
             selectedLanguage={language}
             questionSlug={referencesQuery.data?.slug ?? potd?.slug ?? null}
+            onLanguageChange={setLanguage}
           />
           <ReferencesList
             items={references}

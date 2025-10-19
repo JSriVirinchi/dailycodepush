@@ -60,34 +60,33 @@ const ReferencesList = ({ items, isLoading, errorMessage, onRetry, selectedLangu
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
       <h2 className="text-lg font-semibold text-slate-900">References</h2>
-      <ul className="mt-4 space-y-4">
+      <div className="mt-4 flex gap-4 overflow-x-auto pb-2">
         {items.map((item) => (
-          <li key={`${item.source}-${item.url}`} className="rounded-xl border border-slate-200 p-4 transition hover:border-emerald-200 hover:bg-emerald-50/30">
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <p className="text-sm font-semibold text-emerald-700">{getItemLabel(item, selectedLanguage)}</p>
-                <a
-                  href={item.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-1 block text-sm font-medium text-slate-900 underline decoration-emerald-400 decoration-2 underline-offset-4 hover:text-emerald-700"
-                >
-                  {item.title}
-                </a>
-              </div>
-              <div className="flex items-center gap-3 text-xs text-slate-500">
-                {item.language && <span className="rounded-full bg-slate-100 px-2 py-1 font-medium text-slate-600">{item.language}</span>}
-                {typeof item.votes === 'number' && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 font-medium text-slate-600">
-                    <span aria-hidden="true">▲</span>
-                    {item.votes}
-                  </span>
-                )}
-              </div>
+          <article
+            key={`${item.source}-${item.url}`}
+            className="min-w-[240px] flex-1 rounded-xl border border-slate-200 p-4 transition hover:border-emerald-200 hover:bg-emerald-50/30"
+          >
+            <p className="text-xs font-semibold uppercase tracking-wide text-emerald-600">{getItemLabel(item, selectedLanguage)}</p>
+            <a
+              href={item.url}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-2 block text-sm font-medium text-slate-900 underline decoration-emerald-400 decoration-2 underline-offset-4 hover:text-emerald-700"
+            >
+              {item.title}
+            </a>
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+              {item.language && <span className="rounded-full bg-slate-100 px-2 py-1 font-medium text-slate-600">{item.language}</span>}
+              {typeof item.votes === 'number' && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 font-medium text-slate-600">
+                  <span aria-hidden="true">▲</span>
+                  {item.votes}
+                </span>
+              )}
             </div>
-          </li>
+          </article>
         ))}
-      </ul>
+      </div>
     </section>
   );
 };
