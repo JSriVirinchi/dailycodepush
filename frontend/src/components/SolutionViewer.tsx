@@ -137,6 +137,7 @@ const SolutionViewer = forwardRef<SolutionViewerHandle, SolutionViewerProps>(
   const [isLoadingSubmissions, setIsLoadingSubmissions] = useState(false);
   const [submissionsError, setSubmissionsError] = useState<string | null>(null);
   const [hasMoreSubmissions, setHasMoreSubmissions] = useState(false);
+  const [isStepTwoOpen, setIsStepTwoOpen] = useState(true);
 
   const formatStepLabel = useCallback(
     (value: string) =>
@@ -574,7 +575,13 @@ const SolutionViewer = forwardRef<SolutionViewerHandle, SolutionViewerProps>(
           </div>
         </details>
 
-        <details className="group rounded-2xl border border-slate-200 bg-slate-100/60 p-4 text-sm text-slate-700">
+        <details
+          className="group rounded-2xl border border-slate-200 bg-slate-100/60 p-4 text-sm text-slate-700"
+          open={isStepTwoOpen}
+          onToggle={(event) => {
+            setIsStepTwoOpen(event.currentTarget.open);
+          }}
+        >
           <summary className="flex cursor-pointer items-center justify-between gap-3 text-sm font-semibold text-slate-900">
             <span className="flex items-center gap-2">
               <span aria-hidden="true" className="text-xs text-slate-400 transition-transform group-open:rotate-90">
@@ -602,10 +609,7 @@ const SolutionViewer = forwardRef<SolutionViewerHandle, SolutionViewerProps>(
           </div>
         </details>
 
-        <details
-          className="group rounded-2xl border border-slate-200 bg-slate-100/70 p-4 text-sm text-slate-700"
-          open={Boolean(submissionSteps.length || submissionResult || submissionError || isSubmitting)}
-        >
+        <details className="group rounded-2xl border border-slate-200 bg-slate-100/70 p-4 text-sm text-slate-700">
           <summary className="flex cursor-pointer items-center justify-between gap-3 text-sm font-semibold text-slate-900">
             <span className="flex items-center gap-2">
               <span aria-hidden="true" className="text-xs text-slate-400 transition-transform group-open:rotate-90">
@@ -726,7 +730,7 @@ const SolutionViewer = forwardRef<SolutionViewerHandle, SolutionViewerProps>(
         </details>
 
         {questionSlug && (
-          <details className="group rounded-2xl border border-slate-200 bg-slate-100/60 p-4 text-sm text-slate-700" open={Boolean(recentSubmissions.length)}>
+          <details className="group rounded-2xl border border-slate-200 bg-slate-100/60 p-4 text-sm text-slate-700">
             <summary className="flex cursor-pointer items-center justify-between gap-3 text-sm font-semibold text-slate-900">
               <span className="flex items-center gap-2">
                 <span aria-hidden="true" className="text-xs text-slate-400 transition-transform group-open:rotate-90">

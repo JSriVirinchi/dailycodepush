@@ -4,7 +4,6 @@ import Header from '../components/Header';
 import Footer from '../components/Footer';
 import StatusBar from '../components/StatusBar';
 import PotdCard from '../components/PotdCard';
-import ReferencesList from '../components/ReferencesList';
 import SolutionViewer, { SolutionViewerHandle } from '../components/SolutionViewer';
 import { getPOTD, getReferences, API_BASE_URL, ApiError } from '../lib/api';
 import type { POTD, ReferencesResponse } from '../lib/types';
@@ -43,7 +42,6 @@ const Dashboard = () => {
     placeholderData: (previousData) => previousData ?? undefined
   });
 
-  const references = referencesQuery.data?.items ?? [];
   const communitySolution = referencesQuery.data?.community_solution ?? null;
   const isReferencesLoading = useMemo(
     () => referencesQuery.isLoading || (referencesQuery.isFetching && !referencesQuery.data),
@@ -93,13 +91,6 @@ const Dashboard = () => {
             questionSlug={referencesQuery.data?.slug ?? potd?.slug ?? null}
             onSubmitStateChange={setSubmitState}
             ref={solutionViewerRef}
-          />
-          <ReferencesList
-            items={references}
-            isLoading={isReferencesLoading}
-            errorMessage={referencesErrorMessage}
-            onRetry={() => referencesQuery.refetch()}
-            selectedLanguage={language}
           />
         </div>
       </main>
