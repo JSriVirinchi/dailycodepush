@@ -6,7 +6,26 @@ type PotdCardProps = {
   errorMessage: string | null;
   onRetry: () => void;
   onOpenLink: () => void;
+  selectedLanguage: string;
+  onLanguageChange: (language: string) => void;
+  onSubmit: () => void;
+  isSubmitDisabled: boolean;
+  isSubmitting: boolean;
 };
+
+const LANGUAGES = [
+  'python',
+  'cpp',
+  'java',
+  'javascript',
+  'typescript',
+  'c',
+  'csharp',
+  'go',
+  'rust',
+  'kotlin',
+  'swift'
+] as const;
 
 const difficultyStyles: Record<POTD['difficulty'], string> = {
   Easy: 'bg-emerald-100 text-emerald-800 ring-emerald-200',
@@ -14,7 +33,18 @@ const difficultyStyles: Record<POTD['difficulty'], string> = {
   Hard: 'bg-rose-100 text-rose-800 ring-rose-200'
 };
 
-const PotdCard = ({ potd, isLoading, errorMessage, onRetry, onOpenLink }: PotdCardProps) => {
+const PotdCard = ({
+  potd,
+  isLoading,
+  errorMessage,
+  onRetry,
+  onOpenLink,
+  selectedLanguage,
+  onLanguageChange,
+  onSubmit,
+  isSubmitDisabled,
+  isSubmitting
+}: PotdCardProps) => {
   if (isLoading) {
     return (
       <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -62,7 +92,16 @@ const PotdCard = ({ potd, isLoading, errorMessage, onRetry, onOpenLink }: PotdCa
           <span className="font-semibold uppercase tracking-wide text-slate-400">POTD</span>
           <time dateTime={potd.date}>{new Date(potd.date).toLocaleDateString()}</time>
         </div>
-        <h2 className="text-2xl font-semibold text-slate-900">{potd.title}</h2>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <h2 className="text-2xl font-semibold text-slate-900">{potd.title}</h2>
+          <button
+            type="button"
+            onClick={onOpenLink}
+            className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow transition hover:bg-emerald-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600"
+          >
+            Open on LeetCode
+          </button>
+        </div>
         <div className="flex flex-wrap items-center gap-2">
           <span className={`rounded-full px-3 py-1 text-xs font-semibold ring-1 ring-inset ${difficultyBadge}`}>
             {potd.difficulty}
@@ -84,13 +123,31 @@ const PotdCard = ({ potd, isLoading, errorMessage, onRetry, onOpenLink }: PotdCa
           </li>
         ))}
       </ul>
-      <div>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="flex flex-col gap-2 sm:flex-1">
+          <label htmlFor="potd-language" className="text-sm font-semibold text-slate-900">
+            Preferred language
+          </label>
+          <select
+            id="potd-language"
+            value={selectedLanguage}
+            onChange={(event) => onLanguageChange(event.target.value)}
+            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm text-slate-900 shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+          >
+            {LANGUAGES.map((language) => (
+              <option key={language} value={language}>
+                {language}
+              </option>
+            ))}
+          </select>
+        </div>
         <button
           type="button"
-          onClick={onOpenLink}
-          className="inline-flex w-full items-center justify-center rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow transition hover:bg-emerald-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600 sm:w-auto"
+          onClick={onSubmit}
+          disabled={isSubmitDisabled}
+          className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-6 py-2.5 text-sm font-semibold text-white shadow transition hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:cursor-not-allowed disabled:bg-indigo-300"
         >
-          Open on LeetCode
+          {isSubmitting ? 'Working…' : 'Submit the solution'}
         </button>
       </div>
     </section>

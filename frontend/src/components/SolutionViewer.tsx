@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from 'react';
 import {
   ApiError,
   getLeetCodeSessionStatus,
@@ -14,8 +14,12 @@ type SolutionViewerProps = {
   errorMessage: string | null;
   onRetry: () => void;
   selectedLanguage: string;
-  onLanguageChange: (language: string) => void;
   questionSlug: string | null;
+  onSubmitStateChange?: (state: { isSubmitting: boolean; isSubmitDisabled: boolean }) => void;
+};
+
+export type SolutionViewerHandle = {
+  submit: () => Promise<void>;
 };
 
 type SessionFetchStatus = 'idle' | 'fetching' | 'success' | 'error';
@@ -40,20 +44,6 @@ type ExtensionPayload =
 
 const REQUEST_TYPE = 'LEETCODE_FETCH_COOKIES_REQUEST';
 const RESPONSE_TYPE = 'LEETCODE_FETCH_COOKIES_RESPONSE';
-
-const LANGUAGES = [
-  'python',
-  'cpp',
-  'java',
-  'javascript',
-  'typescript',
-  'c',
-  'csharp',
-  'go',
-  'rust',
-  'kotlin',
-  'swift'
-] as const;
 
 const SESSION_STATUS_STYLES: Record<SessionFetchStatus, string> = {
   idle: 'bg-slate-200 text-slate-600',
@@ -123,15 +113,16 @@ const extractCodeFromContent = (rawContent: string | null | undefined): string |
   return null;
 };
 
-const SolutionViewer = ({
-  solution,
-  isLoading,
-  errorMessage,
-  onRetry,
-  selectedLanguage,
-  onLanguageChange,
-  questionSlug
-}: SolutionViewerProps) => {
+const SolutionViewer = forwardRef<SolutionViewerHandle, SolutionViewerProps>(
+  ({
+    solution,
+    isLoading,
+    errorMessage,
+    onRetry,
+    selectedLanguage,
+    questionSlug,
+    onSubmitStateChange
+  }, ref) => {
   const [sessionStatus, setSessionStatus] = useState<SessionFetchStatus>('idle');
   const [sessionMessage, setSessionMessage] = useState<string | null>(null);
   const [sessionTokens, setSessionTokens] = useState<SessionTokens>({ leetcodeSession: null, csrfToken: null });
@@ -440,6 +431,14 @@ const SolutionViewer = ({
 
   const isSubmitDisabled = !displayCode || !questionSlug || isSubmitting;
 
+  useImperativeHandle(ref, () => ({ submit: handleSubmit }), [handleSubmit]);
+
+  useEffect(() => {
+    if (onSubmitStateChange) {
+      onSubmitStateChange({ isSubmitting, isSubmitDisabled });
+    }
+  }, [onSubmitStateChange, isSubmitting, isSubmitDisabled]);
+
   useEffect(() => {
     if (typeof window === 'undefined' || !questionSlug) {
       return;
@@ -498,12 +497,25 @@ const SolutionViewer = ({
         <p className="mt-2 text-sm text-slate-500">
           No community solution with most votes is available for <span className="font-semibold text-slate-700">{selectedLanguage}</span> yet.
         </p>
+        <p className="mt-4 text-xs text-slate-500">Try selecting another language from the POTD card above.</p>
       </section>
     );
   }
 
   const lastStep = submissionSteps.length ? submissionSteps[submissionSteps.length - 1] : null;
   const finalStatus = submissionResult?.status_msg ?? lastStep?.detail ?? null;
+  const stepTwoStatus = displayCode
+    ? `Language: ${selectedLanguage}`
+    : `Language: ${selectedLanguage} · Snippet unavailable`;
+  const stepThreeStatus =
+    finalStatus ??
+    (submissionError
+      ? 'Error'
+      : isSubmitting
+        ? 'Submitting…'
+        : submissionSteps.length > 0
+          ? `Latest: ${formatStepLabel(submissionSteps[submissionSteps.length - 1].step)}`
+          : 'Not started');
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -522,40 +534,14 @@ const SolutionViewer = ({
           </div>
         </header>
 
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-4">
-          <div className="flex flex-col gap-2 sm:flex-1">
-            <label htmlFor="language-select" className="text-sm font-semibold text-slate-900">
-              Preferred language
-            </label>
-            <select
-              id="language-select"
-              value={selectedLanguage}
-              onChange={(event) => onLanguageChange(event.target.value)}
-              className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm text-slate-900 shadow-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 sm:max-w-md"
-            >
-              {LANGUAGES.map((language) => (
-                <option key={language} value={language}>
-                  {language}
-                </option>
-              ))}
-            </select>
-          </div>
-          <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={isSubmitDisabled}
-            className="inline-flex items-center justify-center rounded-xl bg-indigo-600 px-6 py-2.5 text-sm font-semibold text-white shadow transition hover:bg-indigo-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-indigo-600 disabled:cursor-not-allowed disabled:bg-indigo-300"
-          >
-            {isSubmitting ? 'Working…' : 'Submit the solution'}
-          </button>
-        </div>
-
-        <details
-          className="rounded-2xl border border-slate-200 bg-slate-100/70 p-4 text-sm text-slate-700"
-          open={sessionStatus !== 'idle' || isSubmitting}
-        >
+        <details className="group rounded-2xl border border-slate-200 bg-slate-100/70 p-4 text-sm text-slate-700">
           <summary className="flex cursor-pointer items-center justify-between gap-3 text-sm font-semibold text-slate-900">
-            <span>Step 1 · Extension session fetch</span>
+            <span className="flex items-center gap-2">
+              <span aria-hidden="true" className="text-xs text-slate-400 transition-transform group-open:rotate-90">
+                ▶
+              </span>
+              <span>Step 1 · Extension session fetch</span>
+            </span>
             <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${SESSION_STATUS_STYLES[sessionStatus]}`}>
               {SESSION_STATUS_LABELS[sessionStatus]}
             </span>
@@ -588,27 +574,19 @@ const SolutionViewer = ({
           </div>
         </details>
 
-        <details className="rounded-2xl border border-slate-200 bg-slate-100/60 p-4 text-sm text-slate-700" open>
+        <details className="group rounded-2xl border border-slate-200 bg-slate-100/60 p-4 text-sm text-slate-700">
           <summary className="flex cursor-pointer items-center justify-between gap-3 text-sm font-semibold text-slate-900">
-            <span>Step 2 · What code will be submitted?</span>
-            <span className="text-xs text-slate-500">
-              {solution.language ? `Language: ${solution.language}` : selectedLanguage}
-              {typeof solution.votes === 'number' ? ` · Votes: ${solution.votes}` : ''}
+            <span className="flex items-center gap-2">
+              <span aria-hidden="true" className="text-xs text-slate-400 transition-transform group-open:rotate-90">
+                ▶
+              </span>
+              <span>Step 2 · What code will be submitted?</span>
             </span>
+            <span className="text-xs text-slate-500">{stepTwoStatus}</span>
           </summary>
           <div className="mt-3 space-y-3">
             <div className="text-xs text-slate-600">
               <p>{solution.url ? 'Source: LeetCode discussion thread' : 'Community discussion snapshot'}</p>
-              {solution.url && (
-                <a
-                  href={solution.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-1 inline-block text-xs font-semibold text-emerald-700 underline decoration-emerald-400 decoration-2 underline-offset-4 hover:text-emerald-600"
-                >
-                  Open on LeetCode
-                </a>
-              )}
             </div>
             {displayCode ? (
               <div className="max-h-96 overflow-auto rounded-2xl border border-slate-200 bg-slate-950/90 text-slate-50 shadow-inner">
@@ -625,12 +603,17 @@ const SolutionViewer = ({
         </details>
 
         <details
-          className="rounded-2xl border border-slate-200 bg-slate-100/70 p-4 text-sm text-slate-700"
+          className="group rounded-2xl border border-slate-200 bg-slate-100/70 p-4 text-sm text-slate-700"
           open={Boolean(submissionSteps.length || submissionResult || submissionError || isSubmitting)}
         >
           <summary className="flex cursor-pointer items-center justify-between gap-3 text-sm font-semibold text-slate-900">
-            <span>Step 3 · Submission status</span>
-            {finalStatus && <span className="text-xs text-slate-500">{finalStatus}</span>}
+            <span className="flex items-center gap-2">
+              <span aria-hidden="true" className="text-xs text-slate-400 transition-transform group-open:rotate-90">
+                ▶
+              </span>
+              <span>Step 3 · Submission status</span>
+            </span>
+            <span className="text-xs text-slate-500">{stepThreeStatus}</span>
           </summary>
           <div className="mt-4 space-y-4">
             {submissionSteps.length > 0 ? (
@@ -743,10 +726,17 @@ const SolutionViewer = ({
         </details>
 
         {questionSlug && (
-          <details className="rounded-2xl border border-slate-200 bg-slate-100/60 p-4 text-sm text-slate-700" open>
+          <details className="group rounded-2xl border border-slate-200 bg-slate-100/60 p-4 text-sm text-slate-700" open={Boolean(recentSubmissions.length)}>
             <summary className="flex cursor-pointer items-center justify-between gap-3 text-sm font-semibold text-slate-900">
-              <span>Step 4 · Recent LeetCode submissions</span>
-              {recentSubmissions.length > 0 && <span className="text-xs text-slate-500">{recentSubmissions.length} shown</span>}
+              <span className="flex items-center gap-2">
+                <span aria-hidden="true" className="text-xs text-slate-400 transition-transform group-open:rotate-90">
+                  ▶
+                </span>
+                <span>Step 4 · Recent LeetCode submissions</span>
+              </span>
+              <span className="text-xs text-slate-500">
+                {isLoadingSubmissions ? 'Loading…' : recentSubmissions.length > 0 ? `${recentSubmissions.length} shown` : 'No data yet'}
+              </span>
             </summary>
             <div className="mt-3 space-y-3">
               <div className="flex items-center justify-between gap-3">
@@ -816,6 +806,8 @@ const SolutionViewer = ({
       </div>
     </section>
   );
-};
+});
+
+SolutionViewer.displayName = 'SolutionViewer';
 
 export default SolutionViewer;

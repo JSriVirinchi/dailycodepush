@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import Header from '../components/Header';
 import Footer from '../components/Footer';
 import StatusBar from '../components/StatusBar';
 import PotdCard from '../components/PotdCard';
 import ReferencesList from '../components/ReferencesList';
-import SolutionViewer from '../components/SolutionViewer';
+import SolutionViewer, { SolutionViewerHandle } from '../components/SolutionViewer';
 import { getPOTD, getReferences, API_BASE_URL, ApiError } from '../lib/api';
 import type { POTD, ReferencesResponse } from '../lib/types';
 
@@ -24,6 +24,8 @@ const getErrorMessage = (error: unknown) => {
 
 const Dashboard = () => {
   const [language, setLanguage] = useState('python');
+  const [submitState, setSubmitState] = useState({ isSubmitting: false, isSubmitDisabled: true });
+  const solutionViewerRef = useRef<SolutionViewerHandle>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   const potdQuery = useQuery<POTD>({
@@ -74,6 +76,13 @@ const Dashboard = () => {
                 window.open(potd.link, '_blank', 'noreferrer');
               }
             }}
+            selectedLanguage={language}
+            onLanguageChange={setLanguage}
+            onSubmit={() => {
+              void solutionViewerRef.current?.submit();
+            }}
+            isSubmitDisabled={submitState.isSubmitDisabled}
+            isSubmitting={submitState.isSubmitting}
           />
           <SolutionViewer
             solution={communitySolution}
@@ -82,7 +91,8 @@ const Dashboard = () => {
             onRetry={() => referencesQuery.refetch()}
             selectedLanguage={language}
             questionSlug={referencesQuery.data?.slug ?? potd?.slug ?? null}
-            onLanguageChange={setLanguage}
+            onSubmitStateChange={setSubmitState}
+            ref={solutionViewerRef}
           />
           <ReferencesList
             items={references}
