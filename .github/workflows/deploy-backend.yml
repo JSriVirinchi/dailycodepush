@@ -49,12 +49,13 @@ jobs:
   deploy:
     needs: build-and-push
     runs-on: ubuntu-latest
-    if: ${{ needs.build-and-push.outputs.image != '' && secrets.RENDER_SERVICE_ID != '' && secrets.RENDER_API_KEY != '' }}
+    env:
+      RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+      RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+    if: ${{ needs.build-and-push.outputs.image != '' && env.RENDER_SERVICE_ID != '' && env.RENDER_API_KEY != '' }}
     steps:
       - name: Trigger Render deploy
         env:
-          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
-          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
           IMAGE_URL: ${{ needs.build-and-push.outputs.image }}
         run: |
           curl -X POST \
