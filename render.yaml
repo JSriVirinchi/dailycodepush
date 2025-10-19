@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: leetcode-automation-api
+    env: docker
+    plan: starter
+    branch: main
+    healthCheckPath: /health
+    dockerfilePath: backend/Dockerfile
+    dockerContext: .
+    autoDeploy: true
+    envVars:
+      - key: FRONTEND_ORIGINS
+        sync: false
+      - key: LEETCODE_USER_AGENT
+        sync: false
+      - key: LEETCODE_SESSION
+        sync: false
+      - key: LEETCODE_CSRF_TOKEN
+        sync: false
+      - key: PORT
+        value: "8000"

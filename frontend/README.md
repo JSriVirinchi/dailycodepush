@@ -48,3 +48,5 @@ frontend/
 ## Notes
 - The app only renders metadata and links for references—no solution code is fetched or displayed.
 - Ensure your FastAPI backend enables CORS for `http://localhost:5173` to allow browser requests during development.
+- To deploy on GitHub Pages, push to `main` and the `deploy-frontend.yml` workflow will build the site with the
+  `https://<your-username>.github.io/dailycodepush/` base path.

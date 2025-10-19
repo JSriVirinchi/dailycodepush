@@ -29,6 +29,11 @@ A FastAPI backend that powers the LeetCode POTD dashboard. It proxies the Proble
    uvicorn app.main:app --reload --port 8000
    ```
 
+## Deployment
+- A production-ready Dockerfile lives in `backend/Dockerfile`.
+- The root `render.yaml` blueprint provisions a Render web service from that container; connect your repository in Render or
+  provide `RENDER_SERVICE_ID` and `RENDER_API_KEY` secrets for the GitHub Actions workflow to trigger deployments.
+
 ## API Reference
 - `GET /health` – Basic readiness probe.
 - `GET /api/potd` – Returns the Problem of the Day payload.

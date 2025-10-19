@@ -12,6 +12,21 @@ extension/  Chrome extension to securely hand over the LEETCODE_SESSION + csrfto
 
 Each subproject ships with its own README containing deeper instructions.
 
+## Deployment
+
+The repository now includes infrastructure to publish the dashboard end-to-end:
+
+- **Frontend** – A GitHub Actions workflow (`deploy-frontend.yml`) builds the Vite app and deploys it to GitHub Pages. Set the
+  repository variable `PRODUCTION_API_BASE` to the HTTPS URL of your backend (for example, the Render service below) and push to
+  `main` to trigger a release. The workflow automatically adjusts the Vite base path so the static assets load from
+  `https://<your-username>.github.io/dailycodepush/`.
+- **Backend** – A Dockerfile and Render blueprint (`render.yaml`) describe a containerized FastAPI service. Connect your
+  Render account to this repository, or supply `RENDER_SERVICE_ID` and `RENDER_API_KEY` secrets so the
+  `deploy-backend.yml` workflow can trigger deployments after it publishes the image to GitHub Container Registry.
+
+Once both services are live, update `frontend/.env` (or a Pages variable) so the frontend points at the hosted API and add the
+resulting GitHub Pages origin to the backend’s `FRONTEND_ORIGINS` environment variable.
+
 ## Prerequisites
 
 - Python 3.11+ (recommended) with `venv`
