@@ -20,6 +20,7 @@ jobs:
       IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/leetcode-automation-api
     outputs:
       image: ${{ steps.meta.outputs.image }}
+      has-render-secrets: ${{ steps.render-secrets.outputs.present }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,6 +31,18 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check Render credentials
+        id: render-secrets
+        env:
+          RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
+          RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
+        run: |
+          if [[ -n "$RENDER_SERVICE_ID" && -n "$RENDER_API_KEY" ]]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Build and push image
         id: build
@@ -52,7 +65,7 @@ jobs:
     env:
       RENDER_SERVICE_ID: ${{ secrets.RENDER_SERVICE_ID }}
       RENDER_API_KEY: ${{ secrets.RENDER_API_KEY }}
-    if: ${{ needs.build-and-push.outputs.image != '' && secrets.RENDER_SERVICE_ID != '' && secrets.RENDER_API_KEY != '' }}
+    if: ${{ needs.build-and-push.outputs.image != '' && needs.build-and-push.outputs.has-render-secrets == 'true' }}
     steps:
       - name: Trigger Render deploy
         env:
@@ -63,3 +76,4 @@ jobs:
             -H "Authorization: Bearer ${RENDER_API_KEY}" \
             -H "Content-Type: application/json" \
             -d "{\"clearCache\":false,\"serviceId\":\"${RENDER_SERVICE_ID}\",\"image\":{\"url\":\"${IMAGE_URL}\"}}"
+
