@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "LeetCode Session Bridge",
+  "description": "Fetches LeetCode session cookies and shares them with the POTD dashboard on demand.",
+  "version": "0.1.0",
+  "permissions": ["cookies", "scripting"],
+  "host_permissions": ["https://leetcode.com/*"],
+  "action": {
+    "default_title": "LeetCode Session Bridge"
+  },
+  "background": {
+    "service_worker": "serviceWorker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "http://localhost:5173/*",
+        "http://localhost:4173/*"
+      ],
+      "js": ["contentScript.js"],
+      "run_at": "document_start"
+    }
+  ]
+}
